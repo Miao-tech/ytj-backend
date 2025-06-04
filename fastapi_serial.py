@@ -1,7 +1,6 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 import serial
-import time
 import asyncio
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -60,7 +59,7 @@ async def get():
     except FileNotFoundError:
         return "<h1>Index.html not found</h1>"
 
-@app.get("/open_all_led")
+@app.get("/api/open_all_led")
 async def open_all_led():
     """打开所有LED灯"""
     for led_num in range(1, 10):
@@ -70,7 +69,7 @@ async def open_all_led():
     print("成功打开所有led灯")
     return {"status": "success", "message": "成功打开所有led灯"}
 
-@app.get("/close_all_led")
+@app.get("/api/close_all_led")
 async def close_all_led():
     """关闭所有LED灯"""
     for led_num in range(1, 10):
@@ -80,7 +79,7 @@ async def close_all_led():
     print("成功关闭所有led灯")
     return {"status": "success", "message": "成功关闭所有led灯"}
 
-@app.get("/open_led")
+@app.get("/api/open_led")
 async def open_led(numbers: str):
     """打开指定的LED灯"""
     try:
@@ -97,7 +96,7 @@ async def open_led(numbers: str):
     except Exception as e:
         return {"status": "error", "message": f"操作失败: {str(e)}"}
 
-@app.get("/close_led")
+@app.get("/api/close_led")
 async def close_led(numbers: str):
     """关闭指定的LED灯"""
     try:
@@ -135,7 +134,7 @@ async def check_current_status():
             ser.read_all()
         print("成功关闭万用表")
 
-@app.get("/open_occ")
+@app.get("/api/open_occ")
 async def open_occ():
     """打开示波器"""
     global last_stream_common
@@ -151,7 +150,7 @@ async def open_occ():
     
     return {"status": "success", "message": "成功打开示波器"}
 
-@app.get("/close_occ")
+@app.get("/api/close_occ")
 async def close_occ():
     """关闭示波器"""
     global last_stream_common
@@ -161,7 +160,7 @@ async def close_occ():
     
     return {"status": "success", "message": "成功关闭示波器"}
 
-@app.get("/open_resistense")
+@app.get("/api/open_resistense")
 async def open_resistense():
     """打开万用表-电阻档"""
     global last_stream_common
@@ -174,7 +173,7 @@ async def open_resistense():
     
     return {"status": "success", "message": "成功打开万用表-电阻档"}
 
-@app.get("/open_cont")
+@app.get("/api/open_cont")
 async def open_cont():
     """打开万用表-通断档"""
     global last_stream_common
@@ -187,7 +186,7 @@ async def open_cont():
     
     return {"status": "success", "message": "成功打开万用表-通断档"}
 
-@app.get("/open_dcv")
+@app.get("/api/open_dcv")
 async def open_dcv():
     """打开万用表-直流电压"""
     global last_stream_common
@@ -200,7 +199,7 @@ async def open_dcv():
     
     return {"status": "success", "message": "成功打开万用表-直流电压档"}
 
-@app.get("/open_acv")
+@app.get("/api/open_acv")
 async def open_dcv():
     """打开万用表-交流电压"""
     global last_stream_common
@@ -213,7 +212,7 @@ async def open_dcv():
     
     return {"status": "success", "message": "成功打开万用表-交流电压档"}
 
-@app.get("/open_dca")
+@app.get("/api/open_dca")
 async def open_dcv():
     """打开万用表-直流电流"""
     global last_stream_common
@@ -227,7 +226,7 @@ async def open_dcv():
     return {"status": "success", "message": "成功打开万用表-直流电流档"}
 
 
-@app.get("/close_multimeter")
+@app.get("/api/close_multimeter")
 async def close_multimeter():
     """关闭万用表"""
     global last_stream_common
@@ -248,10 +247,8 @@ async def restore_previous_device():
         # 重新打开万用表电阻档
         await send_serial_command(bytes([0x02, 0x00, 0x01, 0xFE]))
 
-
-
-@app.get("/open_tempature")
-async def open_temperature():
+@app.get("/api/get_temperature")
+async def get_temperature():
     """获取温度数据"""
     # 发送读取温度指令
     await send_serial_command(bytes([0x0B, 0x00, 0x01, 0xFE]))
@@ -261,7 +258,7 @@ async def open_temperature():
     
     return {"status": "success", "message": "成功发送温度读取指令"}
 
-@app.get("/get_distance")
+@app.get("/api/get_distance")
 async def get_distance():
     """获取测距数据"""
     # 发送读取测距指令
@@ -272,7 +269,7 @@ async def get_distance():
     
     return {"status": "success", "message": "成功发送测距读取指令"}
 
-@app.get("/get_light")
+@app.get("/api/get_light")
 async def get_light():
     """获取光照数据"""
     # 发送读取光照指令
@@ -285,19 +282,19 @@ async def get_light():
 
 
 # 电源控制接口
-@app.get("/power_supply_on")
+@app.get("/api/power_supply_on")
 async def power_supply_on():
     """打开电源输出"""
     # await send_serial_command(bytes([0x20, 0x00, 0x01, 0xFE]))
     return {"status": "success", "message": "电源输出已开启"}
 
-@app.get("/power_supply_off")
+@app.get("/api/power_supply_off")
 async def power_supply_off():
     """关闭电源输出"""
     # await send_serial_command(bytes([0x21, 0x00, 0x00, 0xFE]))
     return {"status": "success", "message": "电源输出已关闭"}
 
-@app.get("/set_voltage")
+@app.get("/api/set_voltage")
 async def set_voltage(voltage: float):
     """设置输出电压"""
     if not (0 <= voltage <= 10.1):
@@ -316,7 +313,7 @@ async def set_voltage(voltage: float):
     return {"status": "success", "message": f"电压设置为 {voltage}V"}
 
 # 信号发生器控制接口
-@app.get("/set_waveform")
+@app.get("/api/set_waveform")
 async def set_waveform(waveform: str, frequency: int):
     """设置波形和频率"""
     # 波形类型编码
@@ -333,7 +330,7 @@ async def set_waveform(waveform: str, frequency: int):
     
     return {"status": "success", "message": f"信号发生器设置: {waveform}波, {frequency}Hz"}
 
-@app.get("/signal_generator_stop")
+@app.get("/api/signal_generator_stop")
 async def signal_generator_stop():
     """停止信号发生器"""
     # 假设0x31是停止信号发生器命令
