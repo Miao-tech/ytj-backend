@@ -1,0 +1,86 @@
+{
+  "id": "4940228",
+  "name": "ytj",
+  "font_family": "iconfont",
+  "css_prefix_text": "icon-",
+  "description": "",
+  "glyphs": [
+    {
+      "icon_id": "41456850",
+      "name": "更新",
+      "font_class": "gengxin",
+      "unicode": "e9dc",
+      "unicode_decimal": 59868
+    },
+    {
+      "icon_id": "1286940",
+      "name": "ACT006",
+      "font_class": "act006",
+      "unicode": "e60b",
+      "unicode_decimal": 58891
+    },
+    {
+      "icon_id": "34111066",
+      "name": "光强度图标",
+      "font_class": "a-cellimage_huaban1fuben94",
+      "unicode": "e602",
+      "unicode_decimal": 58882
+    },
+    {
+      "icon_id": "1444833",
+      "name": "led-off",
+      "font_class": "led-off",
+      "unicode": "e7d1",
+      "unicode_decimal": 59345
+    },
+    {
+      "icon_id": "3908653",
+      "name": "波浪线",
+      "font_class": "bolangxian",
+      "unicode": "e66b",
+      "unicode_decimal": 58987
+    },
+    {
+      "icon_id": "12021429",
+      "name": "湿度",
+      "font_class": "shidu",
+      "unicode": "e662",
+      "unicode_decimal": 58978
+    },
+    {
+      "icon_id": "15072634",
+      "name": "方波-01",
+      "font_class": "fangbo-01",
+      "unicode": "e600",
+      "unicode_decimal": 58880
+    },
+    {
+      "icon_id": "16761445",
+      "name": "led-on",
+      "font_class": "led-on",
+      "unicode": "f880",
+      "unicode_decimal": 63616
+    },
+    {
+      "icon_id": "19378052",
+      "name": "温度计",
+      "font_class": "wenduji",
+      "unicode": "e61b",
+      "unicode_decimal": 58907
+    },
+    {
+      "icon_id": "26514547",
+      "name": "手，手势",
+      "font_class": "a-shoushoushi",
+      "unicode": "e8ad",
+      "unicode_decimal": 59565
+    },
+    {
+      "icon_id": "38711407",
+      "name": "正弦曲线",
+      "font_class": "zhengxianquxian",
+      "unicode": "e71f",
+      "unicode_decimal": 59167
+    }
+  ]
+}

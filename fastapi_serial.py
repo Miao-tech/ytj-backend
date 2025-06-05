@@ -1,5 +1,6 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 import serial
 import asyncio
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,6 +22,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.mount("/app", StaticFiles(directory="app"), name="static")
 
 # 串口配置
 SERIAL_PORT = "/dev/ttyACM0"
@@ -49,15 +52,20 @@ async def send_serial_command(command_bytes, delay=0.1):
         ser.write(command_bytes)
         await asyncio.sleep(delay)
 
-@app.get("/", response_class=HTMLResponse)
-async def get():
-    """返回主页面"""
-    try:
-        with open("index.html", "r") as file:
-            html = file.read()
-        return html
-    except FileNotFoundError:
-        return "<h1>Index.html not found</h1>"
+# @app.get("/", response_class=HTMLResponse)
+# async def get():
+#     """返回主页面"""
+#     try:
+#         with open("index.html", "r") as file:
+#             html = file.read()
+#         return html
+#     except FileNotFoundError:
+#         return "<h1>Index.html not found</h1>"
+    
+    
+@app.get("/", response_class=FileResponse)
+async def read_index():
+    return "app/index.html"
 
 @app.get("/api/open_all_led")
 async def open_all_led():
