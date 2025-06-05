@@ -225,7 +225,6 @@ async def open_dcv():
     
     return {"status": "success", "message": "成功打开万用表-直流电流档"}
 
-
 @app.get("/api/close_multimeter")
 async def close_multimeter():
     """关闭万用表"""
@@ -258,6 +257,17 @@ async def get_temperature():
     
     return {"status": "success", "message": "成功发送温度读取指令"}
 
+@app.get("/api/get_gesture")
+async def get_gesture():
+    """获取手势传感器"""
+    # 发送读取温度指令
+    await send_serial_command(bytes([0x00, 0x00, 0x01, 0xFE]))
+    
+    # 恢复之前的设备状态
+    await restore_previous_device()
+    
+    return {"status": "success", "message": "成功发送手势读取指令"}
+
 @app.get("/api/get_distance")
 async def get_distance():
     """获取测距数据"""
@@ -277,7 +287,7 @@ async def get_light():
     
     # 恢复之前的设备状态
     await restore_previous_device()
-    
+
     return {"status": "success", "message": "成功发送光照读取指令"}
 
 
