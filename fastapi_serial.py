@@ -4,6 +4,13 @@ from fastapi.staticfiles import StaticFiles
 import serial
 import asyncio
 from fastapi.middleware.cors import CORSMiddleware
+import logging
+from commandKV import get_command_description
+
+FORMAT = '%(asctime)s %(message)s'
+logging.basicConfig(format=FORMAT)
+d = {}
+logger = logging.getLogger('ytj')
 
 app = FastAPI()
 
@@ -45,24 +52,31 @@ except Exception as e:
     print(f"无法打开串口: {e}")
     ser = None
 
+
 # 辅助函数：发送串口命令
 async def send_serial_command(command_bytes, delay=0.1):
-    """发送串口命令的统一函数"""
-    if ser:
-        ser.write(command_bytes)
-        await asyncio.sleep(delay)
+    """发送串口命令的统一函数，并自动记录日志。"""
+    
+    # 匹配指令并获取描述
+    description = get_command_description(command_bytes)
+    
+    # 使用您的logger记录日志
+    # 这里我们记录了人类可读的描述和原始的十六进制指令，方便调试
+    logger.info(f"发送指令 -> {description} | Hex: {command_bytes.hex().upper()}")
 
-# @app.get("/", response_class=HTMLResponse)
-# async def get():
-#     """返回主页面"""
-#     try:
-#         with open("index.html", "r") as file:
-#             html = file.read()
-#         return html
-#     except FileNotFoundError:
-#         return "<h1>Index.html not found</h1>"
+    if ser:
+        try:
+            ser.write(command_bytes)
+            await asyncio.sleep(delay)
+        except Exception as e:
+            logger.error(f"串口写入失败: {e}")
+    else:
+        # 如果串口未连接，也记录一条警告日志
+        logger.warning("串口未连接，指令未实际发送。")
     
-    
+
+
+
 @app.get("/", response_class=FileResponse)
 async def read_index():
     return "app/index.html"
@@ -73,7 +87,7 @@ async def open_all_led():
     for led_num in range(1, 10):
         command = bytes([LED_COMMANDS[led_num], 0x00, 0x01, 0xFE])
         await send_serial_command(command)
-    
+
     print("成功打开所有led灯")
     return {"status": "success", "message": "成功打开所有led灯"}
 
