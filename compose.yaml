@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  python-llm:
+    image: python:3.9
+    container_name: python-llm
+    volumes:
+      - ./python_app:/app
+    working_dir: /app
+    command: python main.py
+    networks:
+      - app-network
+
+  rocketmq:
+    image: apacherocketmq/rocketmq:latest
+    container_name: rocketmq
+    ports:
+      - "9876:9876"
+      - "10909:10909"
+      - "10911:10911"
+    networks:
+      - app-network
+
+  serial-service:
+    image: your-serial-image:latest  # Replace with actual serial service image
+    container_name: serial-service
+    ports:
+      - "COM1:COM1"  # Adjust port mapping as needed for your serial device
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
