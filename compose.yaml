@@ -1,33 +1,74 @@
-version: '3.8'
-
 services:
-  python-llm:
-    image: python:3.9
-    container_name: python-llm
-    volumes:
-      - ./python_app:/app
-    working_dir: /app
-    command: python main.py
-    networks:
-      - app-network
-
-  rocketmq:
-    image: apacherocketmq/rocketmq:latest
-    container_name: rocketmq
+  # 消息队列服务
+  rabbitmq-service:
+    image: rabbitmq
+    container_name: rabbitmq-service
+    hostname: my-rabbit
     ports:
-      - "9876:9876"
-      - "10909:10909"
-      - "10911:10911"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: turcar
+      RABBITMQ_DEFAULT_PASS: turcar666888
+    restart: unless-stopped
     networks:
       - app-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 5s
+      timeout: 10s
+      retries: 5
 
+
+  # 串口服务
   serial-service:
-    image: your-serial-image:latest  # Replace with actual serial service image
+    build:
+      context: ./serial_service
+      dockerfile: Dockerfile
     container_name: serial-service
-    ports:
-      - "COM1:COM1"  # Adjust port mapping as needed for your serial device
+    environment:
+      RABBITMQ_DEFAULT_USER: turcar
+      RABBITMQ_DEFAULT_PASS: turcar666888
+    devices:
+      - "/dev/ttyACM0:/dev/ttyACM0"
+    depends_on:
+      rabbitmq-service:
+        condition: service_healthy
     networks:
       - app-network
+
+
+  # 一体机web服务
+  ytjweb-service:
+    build:
+      context: ./ytj_web_service
+      dockerfile: Dockerfile
+    container_name: ytjweb-service
+    environment:
+      RABBITMQ_DEFAULT_USER: turcar
+      RABBITMQ_DEFAULT_PASS: turcar666888
+    ports:
+      - "8000:8000"
+    depends_on:
+      rabbitmq-service:
+        condition: service_healthy
+    networks:
+      - app-network
+
+
+  # 一体机mcp服务
+  ytj-mcp-service:
+    build:
+      context: ./ytj_mcp_service
+      dockerfile: Dockerfile
+    container_name: ytj-mcp-service
+    ports:
+      - "8001:8001"
+    depends_on:
+      rabbitmq-service:
+        condition: service_healthy
+    networks:
+      - app-network
+
 
 networks:
   app-network:
