@@ -1,14 +1,14 @@
 services:
   # 消息队列服务
   rabbitmq-service:
-    image: rabbitmq
+    image: rabbitmq:3-management
     container_name: rabbitmq-service
-    hostname: my-rabbit
     ports:
+      - "5672:5672"
       - "15672:15672"
     environment:
-      RABBITMQ_DEFAULT_USER: turcar
-      RABBITMQ_DEFAULT_PASS: turcar666888
+      RABBITMQ_DEFAULT_USER: user
+      RABBITMQ_DEFAULT_PASS: password
     restart: unless-stopped
     networks:
       - app-network
@@ -26,8 +26,8 @@ services:
       dockerfile: Dockerfile
     container_name: serial-service
     environment:
-      RABBITMQ_DEFAULT_USER: turcar
-      RABBITMQ_DEFAULT_PASS: turcar666888
+      RABBITMQ_DEFAULT_USER: user
+      RABBITMQ_DEFAULT_PASS: password
     devices:
       - "/dev/ttyACM0:/dev/ttyACM0"
     depends_on:
@@ -44,8 +44,8 @@ services:
       dockerfile: Dockerfile
     container_name: ytjweb-service
     environment:
-      RABBITMQ_DEFAULT_USER: turcar
-      RABBITMQ_DEFAULT_PASS: turcar666888
+      RABBITMQ_DEFAULT_USER: user
+      RABBITMQ_DEFAULT_PASS: password
     ports:
       - "8000:8000"
     depends_on:

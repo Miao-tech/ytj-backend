@@ -16,17 +16,17 @@ logger = logging.getLogger(__name__)
 
 # RabbitMQ 配置
 MQ_HOST = os.getenv('MQ_HOST', 'rabbitmq-service')
-MQ_PORT = int(os.getenv('MQ_PORT', 5672))
-MQ_USER = os.getenv('MQ_USER', 'user')
-MQ_PASS = os.getenv('MQ_PASS', 'password')
-EXCHANGE_NAME = 'aio_exchange'
 
-# 这是从 web-service 发往 serial-service 的 key
-ROUTING_KEY_TO_SERIAL = 'aio_key'
-# 这是从 serial-service 发往 web-service 的 key
-ROUTING_KEY_FROM_SERIAL = 'serial_data_key'
-# 用于从串口服务接收数据的固定队列
-QUEUE_FROM_SERIAL_TO_WEB = 'aio_queue' 
+MQ_PORT = int(os.getenv('MQ_PORT', 5672))
+MQ_USER = os.getenv('RABBITMQ_DEFAULT_USER', 'user')
+MQ_PASS = os.getenv('RABBITMQ_DEFAULT_PASS', 'password')
+
+EXCHANGE_NAME = 'aio_exchange'
+TO_SERIAL_ROUTING_KEY = 'to_serial_routing_key'
+TO_SERIAL_QUEUE = 'to_serial_queue' 
+
+FROM_SERIAL_ROUTING_KEY = 'from_serial_routing_key'
+FROM_SERIAL_QUEUE = 'from_serial_queue' 
 
 # --- 2. FastAPI 生命周期管理 (Lifespan) ---
 app_state = {}
@@ -45,23 +45,25 @@ async def lifespan(app: FastAPI):
             channel = await connection.channel()
             exchange = await channel.declare_exchange(EXCHANGE_NAME, aio_pika.ExchangeType.DIRECT, durable=True)
             
-            # 在应用启动时声明好这个固定的、持久化的队列
-            queue = await channel.declare_queue(QUEUE_FROM_SERIAL_TO_WEB, durable=True)
-            # 将队列绑定到交换机，以接收来自 serial-service 的消息
-            await queue.bind(exchange, routing_key=ROUTING_KEY_FROM_SERIAL)
-            logger.info(f"队列 '{QUEUE_FROM_SERIAL_TO_WEB}' 已声明并绑定到路由 '{ROUTING_KEY_FROM_SERIAL}'")
+            # 发送指令队列
+            toqueue = await channel.declare_queue(TO_SERIAL_QUEUE, durable=True)
+            await toqueue.bind(exchange, routing_key=TO_SERIAL_ROUTING_KEY)
+            logger.info(f"队列 '{TO_SERIAL_QUEUE}' 已声明并绑定到路由 '{TO_SERIAL_ROUTING_KEY}'")
 
-            # 将资源存入 app_state
+            # 接收指令队列
+            comequeue = await channel.declare_queue(FROM_SERIAL_QUEUE, durable=True)
+            await comequeue.bind(exchange, routing_key=FROM_SERIAL_ROUTING_KEY)
+            logger.info(f"队列 '{FROM_SERIAL_QUEUE}' 已声明并绑定到路由 '{FROM_SERIAL_ROUTING_KEY}'")
+
             app_state["mq_connection"] = connection
             app_state["mq_channel"] = channel
             app_state["mq_exchange"] = exchange
-            
+
             logger.info("✅ RabbitMQ 连接成功并完成设置!")
             break
         except Exception as e:
             logger.error(f"RabbitMQ 连接失败: {e}. 将在 {retry_interval} 秒后重试...")
             await asyncio.sleep(retry_interval)
-            
     yield
     
     # --- 应用关闭时执行 ---
@@ -95,7 +97,7 @@ LED_COMMANDS = {
 }
 
 async def send_serial_command(command_bytes: bytes, exchange: aio_pika.Exchange):
-    await exchange.publish(aio_pika.Message(body=command_bytes), routing_key=ROUTING_KEY_TO_SERIAL)
+    await exchange.publish(aio_pika.Message(body=command_bytes), routing_key=TO_SERIAL_ROUTING_KEY)
 
 async def check_current_status(exchange: aio_pika.Exchange):
     global last_stream_common
@@ -298,21 +300,21 @@ async def websocket_endpoint(websocket: WebSocket, channel: aio_pika.Channel = D
     logger.info("WebSocket 连接已建立")
     
     # 获取对在启动时声明的固定队列的引用
-    queue = await channel.get_queue(QUEUE_FROM_SERIAL_TO_WEB)
+    comequeue = await channel.get_queue(FROM_SERIAL_QUEUE)
 
     try:
         # 从共享队列中异步消费消息
-        async with queue.iterator() as queue_iter:
+        async with comequeue.iterator() as queue_iter:
             async for message in queue_iter:
                 # 使用 message.process() 自动进行 ACK/NACK
                 async with message.process():
                     hex_data = message.body.hex()
-                    print(hex_data)
-                    
+                    logger.info(f"输出到websocket: {hex_data}")
+
                     if websocket.client_state.name == "CONNECTED":
                         await websocket.send_text(hex_data)
                     else:
-                        logger.warning("WebSocket 已断开，停止消费消息。")
+                        logger.info("WebSocket 已断开，停止消费消息。")
                         break
     except WebSocketDisconnect:
         logger.info("WebSocket 连接由客户端主动断开。")
