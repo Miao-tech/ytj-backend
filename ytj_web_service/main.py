@@ -51,7 +51,11 @@ async def lifespan(app: FastAPI):
             logger.info(f"队列 '{TO_SERIAL_QUEUE}' 已声明并绑定到路由 '{TO_SERIAL_ROUTING_KEY}'")
 
             # 接收指令队列
-            comequeue = await channel.declare_queue(FROM_SERIAL_QUEUE, durable=True)
+            from_queue_args = {
+                'x-max-length': 50,      # 队列最大长度50条消息
+                'x-overflow': 'drop-head' # 当队列满时丢弃队头的旧消息
+            }
+            comequeue = await channel.declare_queue(FROM_SERIAL_QUEUE, durable=True, arguments=from_queue_args)
             await comequeue.bind(exchange, routing_key=FROM_SERIAL_ROUTING_KEY)
             logger.info(f"队列 '{FROM_SERIAL_QUEUE}' 已声明并绑定到路由 '{FROM_SERIAL_ROUTING_KEY}'")
 
@@ -296,11 +300,20 @@ async def health():
 # --- 5. WebSocket 端点 ---
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, channel: aio_pika.Channel = Depends(get_mq_channel)):
+    global last_stream_common
+    
     await websocket.accept()
     logger.info("WebSocket 连接已建立")
     
     # 获取对在启动时声明的固定队列的引用
     comequeue = await channel.get_queue(FROM_SERIAL_QUEUE)
+    
+    # 强制清空队列中的所有消息
+    try:
+        purged_result = await comequeue.purge()
+        logger.info(f"WebSocket连接时已清空队列，message_count: {purged_result.message_count} 删除了 {purged_result.message_count} 条消息")
+    except Exception as e:
+        logger.warning(f"清空队列时发生错误: {e}")
 
     try:
         # 从共享队列中异步消费消息
@@ -321,4 +334,21 @@ async def websocket_endpoint(websocket: WebSocket, channel: aio_pika.Channel = D
     except Exception as e:
         logger.error(f"WebSocket 或 RabbitMQ 消费时发生错误: {e}")
     finally:
+        # 在WebSocket断开时检查设备状态，自动关闭正在运行的设备
+        try:
+            exchange = app_state.get("mq_exchange")
+            if exchange and last_stream_common:
+                if last_stream_common == bytes([0x08, 0x00, 0x01, 0xFE]):
+                    # 如果示波器正在运行，发送关闭指令
+                    await send_serial_command(bytes([0x07, 0x00, 0x00, 0xFE]), exchange)
+                    logger.info("WebSocket断开时已自动发送关闭示波器的指令")
+                    last_stream_common = None
+                elif last_stream_common and last_stream_common[0] in [0x02, 0x03, 0x04, 0x05, 0x06]:
+                    # 如果万用表正在运行，发送关闭指令
+                    await send_serial_command(bytes([0x01, 0x00, 0x00, 0xFE]), exchange)
+                    logger.info("WebSocket断开时已自动发送关闭万用表的指令")
+                    last_stream_common = None
+        except Exception as e:
+            logger.error(f"自动关闭设备时发生错误: {e}")
+        
         logger.info("清理 WebSocket 连接资源。")

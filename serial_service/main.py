@@ -40,13 +40,18 @@ def mq_to_serial_worker(serial_port):
         while True:
             try:
                 logger.info(f"正在尝试连接到 RabbitMQ at {MQ_HOST}:{MQ_PORT}...")
-                connection = pika.BlockingConnection(pika.ConnectionParameters(host=MQ_HOST, port=MQ_PORT, credentials=pika.PlainCredentials(MQ_USER, MQ_PASS), retry_delay=3, heartbeat=1))
+                connection = pika.BlockingConnection(pika.ConnectionParameters(host=MQ_HOST, port=MQ_PORT, credentials=pika.PlainCredentials(MQ_USER, MQ_PASS), retry_delay=3, heartbeat=600))
         
                 channel = connection.channel()
 
                 # 声明，确保存在
                 channel.exchange_declare(exchange=EXCHANGE_NAME, exchange_type='direct', durable=True)
-                channel.queue_declare(queue=TO_SERIAL_QUEUE, durable=True)
+                from_queue_args = {
+                    # 'x-message-ttl': 10000,
+                    # 'x-max-length': 100,
+                    # 'x-overflow': 'drop-head'
+                }
+                channel.queue_declare(queue=TO_SERIAL_QUEUE, durable=True, arguments=from_queue_args)
                 channel.queue_bind(queue=TO_SERIAL_QUEUE, exchange=EXCHANGE_NAME, routing_key=TO_SERIAL_ROUTING_KEY)
 
                 logger.info("✅ RabbitMQ 连接成功并完成设置!")
@@ -105,12 +110,17 @@ def serial_to_mq_worker(serial_port):
         while True:
             try:
                 logger.info(f"正在尝试连接到 RabbitMQ at {MQ_HOST}:{MQ_PORT}...")
-                connection = pika.BlockingConnection(pika.ConnectionParameters(host=MQ_HOST, port=MQ_PORT, credentials=pika.PlainCredentials(MQ_USER, MQ_PASS)))
+                connection = pika.BlockingConnection(pika.ConnectionParameters(host=MQ_HOST, port=MQ_PORT, credentials=pika.PlainCredentials(MQ_USER, MQ_PASS), retry_delay=3, heartbeat=600))
                 channel = connection.channel()
 
                 # 声明，确保存在
                 channel.exchange_declare(exchange=EXCHANGE_NAME, exchange_type='direct', durable=True)
-                channel.queue_declare(queue=FROM_SERIAL_QUEUE, durable=True)
+                # 为from_serial_queue设置队列长度限制和丢弃策略
+                from_queue_args = {
+                    'x-max-length': 50,      # 队列最大长度50条消息
+                    'x-overflow': 'drop-head' # 当队列满时丢弃队头的旧消息
+                }
+                channel.queue_declare(queue=FROM_SERIAL_QUEUE, durable=True, arguments=from_queue_args)
                 channel.queue_bind(queue=FROM_SERIAL_QUEUE, exchange=EXCHANGE_NAME, routing_key=FROM_SERIAL_ROUTING_KEY)
 
                 logger.info("✅ RabbitMQ 连接成功并完成设置!")
