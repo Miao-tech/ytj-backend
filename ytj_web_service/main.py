@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import json
 from contextlib import asynccontextmanager
 from datetime import datetime
 
@@ -16,7 +17,6 @@ logger = logging.getLogger(__name__)
 
 # RabbitMQ 配置
 MQ_HOST = os.getenv('MQ_HOST', 'rabbitmq-service')
-
 MQ_PORT = int(os.getenv('MQ_PORT', 5672))
 MQ_USER = os.getenv('RABBITMQ_DEFAULT_USER', 'user')
 MQ_PASS = os.getenv('RABBITMQ_DEFAULT_PASS', 'password')
@@ -28,8 +28,56 @@ TO_SERIAL_QUEUE = 'to_serial_queue'
 FROM_SERIAL_ROUTING_KEY = 'from_serial_routing_key'
 FROM_SERIAL_QUEUE = 'from_serial_queue' 
 
+# 状态持久化文件路径
+STATE_FILE_PATH = "/tmp/device_state.json"
+
 # --- 2. FastAPI 生命周期管理 (Lifespan) ---
 app_state = {}
+
+# --- 辅助函数和全局状态 ---
+led_states = {}  # LED状态字典，存储每个LED的开关状态
+
+LED_COMMANDS = {
+    1: 0x10, 2: 0x11, 3: 0x12, 4: 0x13, 5: 0x14,
+    6: 0x15, 7: 0x16, 8: 0x17, 9: 0x18
+}
+
+# 状态持久化函数
+def save_device_state(device_state, led_states_dict=None):
+    """保存设备状态到文件"""
+    try:
+        state_data = {
+            "last_stream_common": device_state.hex() if device_state else None,
+            "led_states": led_states_dict if led_states_dict is not None else led_states,
+            "timestamp": datetime.now().isoformat()
+        }
+        with open(STATE_FILE_PATH, 'w', encoding='utf-8') as f:
+            json.dump(state_data, f, ensure_ascii=False, indent=2)
+        logger.info(f"设备状态已保存: {state_data}")
+    except Exception as e:
+        logger.error(f"保存设备状态失败: {e}")
+
+def load_device_state():
+    """从文件加载设备状态"""
+    global led_states
+    try:
+        if os.path.exists(STATE_FILE_PATH):
+            with open(STATE_FILE_PATH, 'r', encoding='utf-8') as f:
+                state_data = json.load(f)
+            
+            # 加载LED状态
+            if "led_states" in state_data:
+                led_states = state_data["led_states"]
+                logger.info(f"已加载LED状态: {led_states}")
+            
+            # 加载设备状态
+            if state_data.get("last_stream_common"):
+                device_state = bytes.fromhex(state_data["last_stream_common"])
+                logger.info(f"已加载设备状态: {state_data}")
+                return device_state
+    except Exception as e:
+        logger.error(f"加载设备状态失败: {e}")
+    return None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -64,6 +112,9 @@ async def lifespan(app: FastAPI):
             app_state["mq_exchange"] = exchange
 
             logger.info("✅ RabbitMQ 连接成功并完成设置!")
+            
+            # 在连接成功后，加载并显示设备状态信息
+            await restore_device_state_on_startup()
             break
         except Exception as e:
             logger.error(f"RabbitMQ 连接失败: {e}. 将在 {retry_interval} 秒后重试...")
@@ -93,31 +144,52 @@ async def get_mq_channel() -> aio_pika.Channel:
 async def get_mq_exchange() -> aio_pika.Exchange:
     return app_state["mq_exchange"]
 
-# --- 辅助函数和全局状态 ---
-last_stream_common = None
-LED_COMMANDS = {
-    1: 0x10, 2: 0x11, 3: 0x12, 4: 0x13, 5: 0x14,
-    6: 0x15, 7: 0x16, 8: 0x17, 9: 0x18
-}
+# 在全局变量定义后加载状态
+last_stream_common = load_device_state()  # 从文件加载之前的状态
 
 async def send_serial_command(command_bytes: bytes, exchange: aio_pika.Exchange):
     await exchange.publish(aio_pika.Message(body=command_bytes), routing_key=TO_SERIAL_ROUTING_KEY)
 
-async def check_current_status(exchange: aio_pika.Exchange):
+async def check_current_status(exchange: aio_pika.Exchange, new_command: bytes = None):
+    """检查当前状态，如果需要切换设备则先关闭当前设备"""
     global last_stream_common
-    if last_stream_common is None: return
+    if last_stream_common is None: 
+        return
+    
+    # 如果新命令和当前命令相同，不需要关闭（避免重复开启同一设备时的干扰）
+    if new_command and last_stream_common == new_command:
+        logger.info(f"设备已处于目标状态，无需重复操作: {last_stream_common.hex()}")
+        return
+    
+    # 只有在切换到不同设备时才关闭当前设备
     if last_stream_common == bytes([0x08, 0x00, 0x01, 0xFE]):
         await send_serial_command(bytes([0x07, 0x00, 0x00, 0xFE]), exchange)
-        logger.info("已发送关闭示波器的指令")
+        logger.info("已发送关闭示波器的指令（切换设备）")
     elif last_stream_common and last_stream_common[0] in [0x02, 0x03, 0x04, 0x05, 0x06]:
         await send_serial_command(bytes([0x01, 0x00, 0x00, 0xFE]), exchange)
-        logger.info("已发送关闭万用表的指令")
+        logger.info("已发送关闭万用表的指令（切换设备）")
 
 async def restore_previous_device(exchange: aio_pika.Exchange):
     global last_stream_common
     if last_stream_common:
         logger.info(f"正在恢复之前的设备状态: {last_stream_common.hex()}")
         await send_serial_command(last_stream_common, exchange)
+
+# 新增：在应用启动时恢复设备状态的函数
+async def restore_device_state_on_startup():
+    """在应用启动时恢复设备状态"""
+    global last_stream_common
+    if last_stream_common:
+        logger.info(f"检测到之前的设备状态，将在WebSocket连接时恢复: {last_stream_common.hex()}")
+        # 判断设备类型并记录
+        if last_stream_common == bytes([0x08, 0x00, 0x01, 0xFE]):
+            logger.info("检测到示波器之前处于开启状态")
+        elif last_stream_common and last_stream_common[0] in [0x02, 0x03, 0x04, 0x05, 0x06]:
+            device_types = {0x02: "电阻档", 0x03: "通断档", 0x04: "直流电压档", 0x05: "交流电压档", 0x06: "直流电流档"}
+            device_type = device_types.get(last_stream_common[0], "未知档位")
+            logger.info(f"检测到万用表之前处于开启状态 - {device_type}")
+    else:
+        logger.info("没有检测到之前的设备状态，所有设备处于关闭状态")
 
 # --- 4. API 端点 ---
 @app.get("/", response_class=FileResponse)
@@ -126,38 +198,50 @@ async def read_index():
 
 @app.get("/api/open_all_led")
 async def open_all_led(exchange: aio_pika.Exchange = Depends(get_mq_exchange)):
+    global led_states
     for led_num in range(1, 10):
         command = bytes([LED_COMMANDS[led_num], 0x00, 0x01, 0xFE])
         await send_serial_command(command, exchange)
+        led_states[str(led_num)] = True  # 更新LED状态
+    save_device_state(last_stream_common)  # 保存状态到文件
     return {"status": "success", "message": "成功发送打开所有LED灯的指令"}
 
 @app.get("/api/close_all_led")
 async def close_all_led(exchange: aio_pika.Exchange = Depends(get_mq_exchange)):
+    global led_states
     for led_num in range(1, 10):
         command = bytes([LED_COMMANDS[led_num], 0x00, 0x00, 0xFE])
         await send_serial_command(command, exchange)
+        led_states[str(led_num)] = False  # 更新LED状态
+    save_device_state(last_stream_common)  # 保存状态到文件
     return {"status": "success", "message": "成功发送关闭所有LED灯的指令"}
 
 @app.get("/api/open_led")
 async def open_led(numbers: str, exchange: aio_pika.Exchange = Depends(get_mq_exchange)):
+    global led_states
     try:
         led_numbers = [int(num.strip()) for num in numbers.split(',')]
         for led_num in led_numbers:
             if led_num in LED_COMMANDS:
                 command = bytes([LED_COMMANDS[led_num], 0x00, 0x01, 0xFE])
                 await send_serial_command(command, exchange)
+                led_states[str(led_num)] = True  # 更新LED状态
+        save_device_state(last_stream_common)  # 保存状态到文件
         return {"status": "success", "message": f"成功发送打开 {len(led_numbers)} 个LED灯的指令"}
     except Exception as e:
         return {"status": "error", "message": f"操作失败: {str(e)}"}
 
 @app.get("/api/close_led")
 async def close_led(numbers: str, exchange: aio_pika.Exchange = Depends(get_mq_exchange)):
+    global led_states
     try:
         led_numbers = [int(num.strip()) for num in numbers.split(',')]
         for led_num in led_numbers:
             if led_num in LED_COMMANDS:
                 command = bytes([LED_COMMANDS[led_num], 0x00, 0x00, 0xFE])
                 await send_serial_command(command, exchange)
+                led_states[str(led_num)] = False  # 更新LED状态
+        save_device_state(last_stream_common)  # 保存状态到文件
         return {"status": "success", "message": f"成功发送关闭 {len(led_numbers)} 个LED灯的指令"}
     except Exception as e:
         return {"status": "error", "message": f"操作失败: {str(e)}"}
@@ -165,9 +249,10 @@ async def close_led(numbers: str, exchange: aio_pika.Exchange = Depends(get_mq_e
 @app.get("/api/open_occ")
 async def open_occ(exchange: aio_pika.Exchange = Depends(get_mq_exchange)):
     global last_stream_common
-    await check_current_status(exchange)
     command = bytes([0x08, 0x00, 0x01, 0xFE])
+    await check_current_status(exchange, command)
     last_stream_common = command
+    save_device_state(last_stream_common)  # 保存状态到文件
     await send_serial_command(command, exchange)
     return {"status": "success", "message": "成功打开示波器"}
 
@@ -176,50 +261,56 @@ async def close_occ(exchange: aio_pika.Exchange = Depends(get_mq_exchange)):
     global last_stream_common
     await send_serial_command(bytes([0x07, 0x00, 0x00, 0xFE]), exchange)
     last_stream_common = None
+    save_device_state(last_stream_common)  # 保存状态到文件
     return {"status": "success", "message": "成功关闭示波器"}
 
 @app.get("/api/open_resistense")
 async def open_resistense(exchange: aio_pika.Exchange = Depends(get_mq_exchange)):
     global last_stream_common
-    await check_current_status(exchange)
     command = bytes([0x02, 0x00, 0x01, 0xFE])
+    await check_current_status(exchange, command)
     last_stream_common = command
+    save_device_state(last_stream_common)  # 保存状态到文件
     await send_serial_command(command, exchange)
     return {"status": "success", "message": "成功打开万用表-电阻档"}
 
 @app.get("/api/open_cont")
 async def open_cont(exchange: aio_pika.Exchange = Depends(get_mq_exchange)):
     global last_stream_common
-    await check_current_status(exchange)
     command = bytes([0x03, 0x00, 0x02, 0xFE])
+    await check_current_status(exchange, command)
     last_stream_common = command
+    save_device_state(last_stream_common)  # 保存状态到文件
     await send_serial_command(command, exchange)
     return {"status": "success", "message": "成功打开万用表-通断档"}
 
 @app.get("/api/open_dcv")
 async def open_dcv(exchange: aio_pika.Exchange = Depends(get_mq_exchange)):
     global last_stream_common
-    await check_current_status(exchange)
     command = bytes([0x04, 0x00, 0x03, 0xFE])
+    await check_current_status(exchange, command)
     last_stream_common = command
+    save_device_state(last_stream_common)  # 保存状态到文件
     await send_serial_command(command, exchange)
     return {"status": "success", "message": "成功打开万用表-直流电压档"}
 
 @app.get("/api/open_acv")
 async def open_acv(exchange: aio_pika.Exchange = Depends(get_mq_exchange)):
     global last_stream_common
-    await check_current_status(exchange)
     command = bytes([0x05, 0x00, 0x04, 0xFE])
+    await check_current_status(exchange, command)
     last_stream_common = command
+    save_device_state(last_stream_common)  # 保存状态到文件
     await send_serial_command(command, exchange)
     return {"status": "success", "message": "成功打开万用表-交流电压档"}
 
 @app.get("/api/open_dca")
 async def open_dca(exchange: aio_pika.Exchange = Depends(get_mq_exchange)):
     global last_stream_common
-    await check_current_status(exchange)
     command = bytes([0x06, 0x00, 0x05, 0xFE])
+    await check_current_status(exchange, command)
     last_stream_common = command
+    save_device_state(last_stream_common)  # 保存状态到文件
     await send_serial_command(command, exchange)
     return {"status": "success", "message": "成功打开万用表-直流电流档"}
 
@@ -228,6 +319,7 @@ async def close_multimeter(exchange: aio_pika.Exchange = Depends(get_mq_exchange
     global last_stream_common
     await send_serial_command(bytes([0x01, 0x00, 0x00, 0xFE]), exchange)
     last_stream_common = None
+    save_device_state(last_stream_common)  # 保存状态到文件
     return {"status": "success", "message": "成功关闭万用表"}
 
 @app.get("/api/get_temperature")
@@ -297,13 +389,208 @@ async def signal_generator_stop(exchange: aio_pika.Exchange = Depends(get_mq_exc
 async def health():
     return {"status": "success", "message": f"当前时间: {datetime.now().isoformat()}"}
 
+# 新增：查询当前设备状态的API
+@app.get("/api/device_status")
+async def get_device_status():
+    """获取当前设备状态"""
+    global last_stream_common, led_states
+    
+    # 构建LED状态，确保所有LED都有状态
+    led_ui_state = {}
+    for led_num in range(1, 10):
+        led_ui_state[f"led{led_num}"] = led_states.get(str(led_num), False)
+    
+    if last_stream_common is None:
+        return {
+            "status": "success", 
+            "device_state": "closed",
+            "device_type": None,
+            "ui_state": {
+                "oscilloscope_button": "closed",
+                "multimeter_buttons": {
+                    "resistance": "closed",
+                    "continuity": "closed", 
+                    "dc_voltage": "closed",
+                    "ac_voltage": "closed",
+                    "dc_current": "closed"
+                },
+                "led_states": led_ui_state
+            },
+            "message": "所有设备均已关闭"
+        }
+    
+    # 判断设备类型
+    if last_stream_common == bytes([0x08, 0x00, 0x01, 0xFE]):
+        return {
+            "status": "success",
+            "device_state": "opened", 
+            "device_type": "oscilloscope",
+            "device_name": "示波器",
+            "command_hex": last_stream_common.hex(),
+            "ui_state": {
+                "oscilloscope_button": "opened",
+                "multimeter_buttons": {
+                    "resistance": "closed",
+                    "continuity": "closed",
+                    "dc_voltage": "closed", 
+                    "ac_voltage": "closed",
+                    "dc_current": "closed"
+                },
+                "led_states": led_ui_state
+            },
+            "message": "示波器当前处于开启状态"
+        }
+    elif last_stream_common and last_stream_common[0] in [0x02, 0x03, 0x04, 0x05, 0x06]:
+        device_info = {
+            0x02: {"type": "multimeter_resistance", "name": "万用表-电阻档", "ui_key": "resistance"},
+            0x03: {"type": "multimeter_continuity", "name": "万用表-通断档", "ui_key": "continuity"}, 
+            0x04: {"type": "multimeter_dc_voltage", "name": "万用表-直流电压档", "ui_key": "dc_voltage"},
+            0x05: {"type": "multimeter_ac_voltage", "name": "万用表-交流电压档", "ui_key": "ac_voltage"},
+            0x06: {"type": "multimeter_dc_current", "name": "万用表-直流电流档", "ui_key": "dc_current"}
+        }
+        info = device_info.get(last_stream_common[0], {"type": "unknown", "name": "未知设备", "ui_key": "unknown"})
+        
+        # 构建万用表按钮状态
+        multimeter_buttons = {
+            "resistance": "closed",
+            "continuity": "closed",
+            "dc_voltage": "closed",
+            "ac_voltage": "closed", 
+            "dc_current": "closed"
+        }
+        if info["ui_key"] in multimeter_buttons:
+            multimeter_buttons[info["ui_key"]] = "opened"
+        
+        return {
+            "status": "success",
+            "device_state": "opened",
+            "device_type": info["type"],
+            "device_name": info["name"],
+            "command_hex": last_stream_common.hex(),
+            "ui_state": {
+                "oscilloscope_button": "closed",
+                "multimeter_buttons": multimeter_buttons,
+                "led_states": led_ui_state
+            },
+            "message": f"{info['name']}当前处于开启状态"
+        }
+    else:
+        return {
+            "status": "success",
+            "device_state": "unknown",
+            "device_type": "unknown", 
+            "command_hex": last_stream_common.hex(),
+            "ui_state": {
+                "oscilloscope_button": "unknown",
+                "multimeter_buttons": {
+                    "resistance": "unknown",
+                    "continuity": "unknown",
+                    "dc_voltage": "unknown",
+                    "ac_voltage": "unknown",
+                    "dc_current": "unknown"
+                },
+                "led_states": led_ui_state
+            },
+            "message": "检测到未知的设备状态"
+        }
+
+# 新增：前端页面加载时的状态初始化API
+@app.get("/api/init_ui_state")
+async def init_ui_state():
+    """前端页面加载时调用，获取完整的UI状态信息"""
+    global last_stream_common
+    
+    # 获取设备状态
+    device_status = await get_device_status()
+    
+    # 添加额外的初始化信息
+    init_info = {
+        "timestamp": datetime.now().isoformat(),
+        "server_status": "running",
+        "websocket_endpoint": "/ws",
+        "device_status": device_status,
+        "initialization": "completed"
+    }
+    
+    logger.info(f"前端请求初始化UI状态: {device_status.get('device_type', 'none')} - {device_status.get('device_state', 'closed')}")
+    
+    return init_info
+
 # --- 5. WebSocket 端点 ---
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, channel: aio_pika.Channel = Depends(get_mq_channel)):
-    global last_stream_common
+    global last_stream_common, led_states
     
     await websocket.accept()
     logger.info("WebSocket 连接已建立")
+    
+    # 获取exchange用于恢复设备状态
+    exchange = app_state.get("mq_exchange")
+    
+    # 在WebSocket连接建立后，恢复LED状态
+    if led_states and exchange:
+        logger.info(f"恢复LED状态: {led_states}")
+        for led_num_str, is_on in led_states.items():
+            if is_on:  # 只恢复开启的LED
+                led_num = int(led_num_str)
+                if led_num in LED_COMMANDS:
+                    command = bytes([LED_COMMANDS[led_num], 0x00, 0x01, 0xFE])
+                    await send_serial_command(command, exchange)
+                    logger.info(f"✅ 已恢复LED{led_num}开启状态")
+    
+    # 在WebSocket连接建立后，如果有之前保存的设备状态，自动恢复
+    if last_stream_common and exchange:
+        logger.info(f"WebSocket连接后自动恢复设备状态: {last_stream_common.hex()}")
+        await send_serial_command(last_stream_common, exchange)
+        
+        # 记录恢复的设备类型
+        device_state_info = None
+        if last_stream_common == bytes([0x08, 0x00, 0x01, 0xFE]):
+            logger.info("✅ 已自动恢复示波器开启状态")
+            device_state_info = {
+                "type": "state_sync",
+                "device": "oscilloscope", 
+                "state": "opened",
+                "message": "示波器状态已恢复为开启"
+            }
+        elif last_stream_common and last_stream_common[0] in [0x02, 0x03, 0x04, 0x05, 0x06]:
+            device_types = {0x02: "电阻档", 0x03: "通断档", 0x04: "直流电压档", 0x05: "交流电压档", 0x06: "直流电流档"}
+            device_type = device_types.get(last_stream_common[0], "未知档位")
+            logger.info(f"✅ 已自动恢复万用表开启状态 - {device_type}")
+            
+            device_types_map = {
+                0x02: "resistance", 0x03: "continuity", 0x04: "dc_voltage", 
+                0x05: "ac_voltage", 0x06: "dc_current"
+            }
+            device_state_info = {
+                "type": "state_sync",
+                "device": "multimeter",
+                "subtype": device_types_map.get(last_stream_common[0], "unknown"),
+                "state": "opened", 
+                "message": f"万用表{device_type}状态已恢复为开启"
+            }
+        
+        # 发送状态同步消息到前端
+        if device_state_info:
+            sync_message = json.dumps(device_state_info, ensure_ascii=False)
+            try:
+                await websocket.send_text(sync_message)
+                logger.info(f"已发送状态同步消息到前端: {sync_message}")
+            except Exception as e:
+                logger.error(f"发送状态同步消息失败: {e}")
+    
+    # 发送LED状态同步消息到前端
+    if led_states:
+        led_sync_message = json.dumps({
+            "type": "led_state_sync",
+            "led_states": led_states,
+            "message": "LED状态已恢复"
+        }, ensure_ascii=False)
+        try:
+            await websocket.send_text(led_sync_message)
+            logger.info(f"已发送LED状态同步消息到前端: {led_sync_message}")
+        except Exception as e:
+            logger.error(f"发送LED状态同步消息失败: {e}")
     
     # 获取对在启动时声明的固定队列的引用
     comequeue = await channel.get_queue(FROM_SERIAL_QUEUE)
@@ -334,21 +621,4 @@ async def websocket_endpoint(websocket: WebSocket, channel: aio_pika.Channel = D
     except Exception as e:
         logger.error(f"WebSocket 或 RabbitMQ 消费时发生错误: {e}")
     finally:
-        # 在WebSocket断开时检查设备状态，自动关闭正在运行的设备
-        try:
-            exchange = app_state.get("mq_exchange")
-            if exchange and last_stream_common:
-                if last_stream_common == bytes([0x08, 0x00, 0x01, 0xFE]):
-                    # 如果示波器正在运行，发送关闭指令
-                    await send_serial_command(bytes([0x07, 0x00, 0x00, 0xFE]), exchange)
-                    logger.info("WebSocket断开时已自动发送关闭示波器的指令")
-                    last_stream_common = None
-                elif last_stream_common and last_stream_common[0] in [0x02, 0x03, 0x04, 0x05, 0x06]:
-                    # 如果万用表正在运行，发送关闭指令
-                    await send_serial_command(bytes([0x01, 0x00, 0x00, 0xFE]), exchange)
-                    logger.info("WebSocket断开时已自动发送关闭万用表的指令")
-                    last_stream_common = None
-        except Exception as e:
-            logger.error(f"自动关闭设备时发生错误: {e}")
-        
         logger.info("清理 WebSocket 连接资源。")
