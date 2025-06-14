@@ -1,7 +1,9 @@
 services:
   # 消息队列服务
   rabbitmq-service:
-    image: rabbitmq:3-management
+    build:
+      context: ./rabbitmq_service
+      dockerfile: Dockerfile
     container_name: rabbitmq-service
     ports:
       - "5672:5672"

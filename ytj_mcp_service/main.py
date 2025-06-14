@@ -7,7 +7,9 @@ mcp = FastMCP("Start Yitiji MCP Server")
 # 在本地直接运行时，"http://127.0.0.1:8000" 是正确的。
 # 如果你在 Docker Compose 环境中运行这个脚本，你需要将地址改为 FastAPI 服务的名称，
 # 例如: YTJ_API_URL = "http://ytjweb-service:8000"
-YTJ_API_URL = "http://127.0.0.1:8000"
+
+
+YTJ_API_URL = "http://ytjweb-service:8000"
 
 # --- LED 控制 ---
 
@@ -16,8 +18,13 @@ def open_all_led() -> str:
     """
     打开设备所有led灯
     """
-    response = requests.get(f'{YTJ_API_URL}/api/open_all_led')
-    return "成功发送打开所有LED灯的指令"
+    try:
+        response = requests.get(f'{YTJ_API_URL}/api/open_all_led', timeout=5)
+        response.raise_for_status()
+        return "成功发送打开所有LED灯的指令"
+    except requests.exceptions.RequestException as e:
+        print(f"请求失败: {str(e)}")
+        raise Exception(f"无法连接到 ytjweb-service: {str(e)}")
 
 @mcp.tool()
 def close_all_led() -> str:

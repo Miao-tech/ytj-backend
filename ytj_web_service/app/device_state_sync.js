@@ -217,8 +217,10 @@ class DeviceStateSync {
      * 处理状态同步消息
      */
     handleStateSyncMessage(data) {
-        if (data.device === 'oscilloscope') {
-            this.updateOscilloscopeButton(data.state);
+        console.log('📡 收到状态同步消息:', data);
+        
+        if (data.device === 'oscilloscope' || data.device_type === 'oscilloscope') {
+            this.updateOscilloscopeButton(data.state || data.device_state);
         } else if (data.device === 'multimeter') {
             const states = {
                 resistance: 'closed',
