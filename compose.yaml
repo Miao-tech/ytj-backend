@@ -1,9 +1,7 @@
 services:
   # 消息队列服务
   rabbitmq-service:
-    build:
-      context: ./rabbitmq_service
-      dockerfile: Dockerfile
+    image: rabbitmq:3-management
     container_name: rabbitmq-service
     ports:
       - "5672:5672"
@@ -70,6 +68,28 @@ services:
         condition: service_healthy
     networks:
       - app-network
+
+
+
+  # chat-inspector服务 (精简版)
+  chat-inspector-service:
+    build:
+      context: ./chat-inspector-prod
+      dockerfile: Dockerfile
+    container_name: chat-inspector-service
+    ports:
+      - "6274:6274"  # 客户端端口
+      - "6277:6277"  # 服务器端口
+    environment:
+      CLIENT_PORT: 6274
+      SERVER_PORT: 6277
+      NODE_ENV: production
+    # depends_on:
+    #   ytj-mcp-service:
+    #     condition: service_healthy
+    networks:
+      - app-network
+    restart: unless-stopped
 
 
 networks:

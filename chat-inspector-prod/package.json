@@ -1,0 +1,49 @@
+{
+  "name": "@modelcontextprotocol/inspector",
+  "version": "0.14.0",
+  "description": "Model Context Protocol inspector",
+  "license": "MIT",
+  "author": "Anthropic, PBC (https://anthropic.com)",
+  "homepage": "https://modelcontextprotocol.io",
+  "bugs": "https://github.com/modelcontextprotocol/inspector/issues",
+  "type": "module",
+  "bin": {
+    "mcp-inspector": "cli/build/cli.js"
+  },
+  "files": [
+    "client/bin",
+    "client/dist",
+    "server/build"
+  ],
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "start": "node client/bin/start.js",
+    "start-server": "cd server && npm run start",
+    "start-client": "cd client && npm run preview"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/inspector-cli": "^0.14.0",
+    "@modelcontextprotocol/inspector-client": "^0.14.0",
+    "@modelcontextprotocol/inspector-server": "^0.14.0",
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "concurrently": "^9.0.1",
+    "open": "^10.1.0",
+    "shell-quote": "^1.8.2",
+    "spawn-rx": "^5.1.2",
+    "ts-node": "^10.9.2",
+    "zod": "^3.23.8",
+    "vite": "^6.3.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "@types/node": "^22.7.5",
+    "@types/shell-quote": "^1.7.5",
+    "jest-fixed-jsdom": "^0.0.9",
+    "prettier": "3.3.3",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.4.2"
+  }
+}
