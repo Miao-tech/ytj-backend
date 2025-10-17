@@ -53,7 +53,7 @@ signal_generator_state = {
 
 LED_COMMANDS = {
     1: 0x10, 2: 0x11, 3: 0x12, 4: 0x13, 5: 0x14,
-    6: 0x15, 7: 0x16, 8: 0x17, 9: 0x18
+    6: 0x15, 7: 0x16, 8: 0x17, 9: 0x18, 10: 0x19, 11: 0x1A
 }
 
 # 全局WebSocket连接管理
@@ -108,16 +108,13 @@ async def broadcast_state_update(state_data):
                 
             # 万用表开启指令识别
             elif command_hex.startswith("02") or command_hex.startswith("03") or \
-                 command_hex.startswith("04") or command_hex.startswith("05") or \
-                 command_hex.startswith("06"):
-                
+                 command_hex.startswith("04"):
+
                 # 根据指令确定万用表类型
                 multimeter_types = {
                     "02": {"type": "multimeter_resistance", "name": "万用表-电阻档", "subtype": "resistance"},
                     "03": {"type": "multimeter_continuity", "name": "万用表-通断档", "subtype": "continuity"},
-                    "04": {"type": "multimeter_dc_voltage", "name": "万用表-直流电压档", "subtype": "dc_voltage"},
-                    "05": {"type": "multimeter_ac_voltage", "name": "万用表-交流电压档", "subtype": "ac_voltage"},
-                    "06": {"type": "multimeter_dc_current", "name": "万用表-直流电流档", "subtype": "dc_current"}
+                    "04": {"type": "multimeter_dc_voltage", "name": "万用表-直流电压档", "subtype": "dc_voltage"}
                 }
                 
                 device_prefix = command_hex[:2]
@@ -344,7 +341,7 @@ async def check_current_status(exchange: aio_pika.Exchange, new_command: bytes =
     if last_stream_common == bytes([0x08, 0x00, 0x01, 0xFE]):
         await send_serial_command(bytes([0x07, 0x00, 0x00, 0xFE]), exchange)
         logger.info("已发送关闭示波器的指令（切换设备）")
-    elif last_stream_common and last_stream_common[0] in [0x02, 0x03, 0x04, 0x05, 0x06]:
+    elif last_stream_common and last_stream_common[0] in [0x02, 0x03, 0x04]:
         await send_serial_command(bytes([0x01, 0x00, 0x00, 0xFE]), exchange)
         logger.info("已发送关闭万用表的指令（切换设备）")
 
@@ -363,8 +360,8 @@ async def restore_device_state_on_startup():
         # 判断设备类型并记录
         if last_stream_common == bytes([0x08, 0x00, 0x01, 0xFE]):
             logger.info("检测到示波器之前处于开启状态")
-        elif last_stream_common and last_stream_common[0] in [0x02, 0x03, 0x04, 0x05, 0x06]:
-            device_types = {0x02: "电阻档", 0x03: "通断档", 0x04: "直流电压档", 0x05: "交流电压档", 0x06: "直流电流档"}
+        elif last_stream_common and last_stream_common[0] in [0x02, 0x03, 0x04]:
+            device_types = {0x02: "电阻档", 0x03: "通断档", 0x04: "直流电压档"}
             device_type = device_types.get(last_stream_common[0], "未知档位")
             logger.info(f"检测到万用表之前处于开启状态 - {device_type}")
     else:
@@ -378,7 +375,7 @@ async def read_index():
 @app.get("/api/open_all_led")
 async def open_all_led(exchange: aio_pika.Exchange = Depends(get_mq_exchange)):
     global led_states
-    for led_num in range(1, 10):
+    for led_num in range(1, 12):
         command = bytes([LED_COMMANDS[led_num], 0x00, 0x01, 0xFE])
         await send_serial_command(command, exchange)
         led_states[str(led_num)] = True  # 更新LED状态
@@ -388,7 +385,7 @@ async def open_all_led(exchange: aio_pika.Exchange = Depends(get_mq_exchange)):
 @app.get("/api/close_all_led")
 async def close_all_led(exchange: aio_pika.Exchange = Depends(get_mq_exchange)):
     global led_states
-    for led_num in range(1, 10):
+    for led_num in range(1, 12):
         command = bytes([LED_COMMANDS[led_num], 0x00, 0x00, 0xFE])
         await send_serial_command(command, exchange)
         led_states[str(led_num)] = False  # 更新LED状态
@@ -469,24 +466,6 @@ async def open_dcv(exchange: aio_pika.Exchange = Depends(get_mq_exchange)):
     await save_device_state(last_stream_common)  # 保存状态到文件
     return {"message": "成功发送打开万用表-直流电压档的指令"}
 
-@app.get("/api/open_acv")
-async def open_acv(exchange: aio_pika.Exchange = Depends(get_mq_exchange)):
-    global last_stream_common
-    await check_current_status(exchange, bytes([0x05, 0x00, 0x04, 0xFE]))
-    await send_serial_command(bytes([0x05, 0x00, 0x04, 0xFE]), exchange)
-    last_stream_common = bytes([0x05, 0x00, 0x04, 0xFE])  # 更新当前设备状态
-    await save_device_state(last_stream_common)  # 保存状态到文件
-    return {"message": "成功发送打开万用表-交流电压档的指令"}
-
-@app.get("/api/open_dca")
-async def open_dca(exchange: aio_pika.Exchange = Depends(get_mq_exchange)):
-    global last_stream_common
-    await check_current_status(exchange, bytes([0x06, 0x00, 0x05, 0xFE]))
-    await send_serial_command(bytes([0x06, 0x00, 0x05, 0xFE]), exchange)
-    last_stream_common = bytes([0x06, 0x00, 0x05, 0xFE])  # 更新当前设备状态
-    await save_device_state(last_stream_common)  # 保存状态到文件
-    return {"message": "成功发送打开万用表-直流电流档的指令"}
-
 @app.get("/api/close_multimeter")
 async def close_multimeter(exchange: aio_pika.Exchange = Depends(get_mq_exchange)):
     global last_stream_common
@@ -497,7 +476,7 @@ async def close_multimeter(exchange: aio_pika.Exchange = Depends(get_mq_exchange
 
 @app.get("/api/get_temperature")
 async def get_temperature(exchange: aio_pika.Exchange = Depends(get_mq_exchange)):
-    await send_serial_command(bytes([0x0B, 0x00, 0x01, 0xFE]), exchange)
+    await send_serial_command(bytes([0x0D, 0x00, 0x01, 0xFE]), exchange)
     await restore_previous_device(exchange)
     return {"status": "success", "message": "成功发送温度读取指令"}
 
@@ -515,9 +494,23 @@ async def get_distance(exchange: aio_pika.Exchange = Depends(get_mq_exchange)):
 
 @app.get("/api/get_light")
 async def get_light(exchange: aio_pika.Exchange = Depends(get_mq_exchange)):
-    await send_serial_command(bytes([0x0E, 0x00, 0x01, 0xFE]), exchange)
+    await send_serial_command(bytes([0x05, 0x00, 0x01, 0xFE]), exchange)
     await restore_previous_device(exchange)
     return {"status": "success", "message": "成功发送光照读取指令"}
+
+@app.get("/api/trigger_buzzer")
+async def trigger_buzzer(exchange: aio_pika.Exchange = Depends(get_mq_exchange)):
+    """触发蜂鸣器，响0.1秒 (0x64 = 100 = 0.1s * 1000)"""
+    await send_serial_command(bytes([0x06, 0x00, 0x64, 0xFE]), exchange)
+    await restore_previous_device(exchange)
+    return {"status": "success", "message": "成功触发蜂鸣器"}
+
+@app.get("/api/get_infrared_sensors")
+async def get_infrared_sensors(exchange: aio_pika.Exchange = Depends(get_mq_exchange)):
+    """获取3个红外传感器状态 (发送 0x0b 0x00 0x01 0xfe)"""
+    await send_serial_command(bytes([0x0B, 0x00, 0x01, 0xFE]), exchange)
+    await restore_previous_device(exchange)
+    return {"status": "success", "message": "成功发送红外传感器状态读取指令"}
 
 @app.get("/api/power_supply_on")
 async def power_supply_on(exchange: aio_pika.Exchange = Depends(get_mq_exchange)):
@@ -539,20 +532,20 @@ async def power_supply_off(exchange: aio_pika.Exchange = Depends(get_mq_exchange
 @app.get("/api/set_voltage")
 async def set_voltage(voltage: float, exchange: aio_pika.Exchange = Depends(get_mq_exchange)):
     global power_supply_state
-    if not (0 <= voltage <= 10.1):
-        return {"status": "error", "message": "电压超出范围 (0-10.1V)"}
-    
+    if not (0 <= voltage <= 12.0):
+        return {"status": "error", "message": "电压超出范围 (0-12.0V)"}
+
     # 更新电源状态
     power_supply_state["setVoltage"] = voltage
     if power_supply_state["outputEnabled"]:
         power_supply_state["actualVoltage"] = voltage  # 如果输出开启，设置实际电压
-    
+
     command = None
-    if voltage == 0.1: command = bytes([0x09, 0x00, 0x01, 0xFE])
-    elif voltage == 1.0: command = bytes([0x09, 0x00, 0x64, 0xFE])
-    elif voltage == 10.0: command = bytes([0x09, 0x03, 0xe8, 0xFE])
-    elif voltage == 10.1: command = bytes([0x09, 0x03, 0xe9, 0xFE])
-    
+    if voltage == 2.0: command = bytes([0x09, 0x00, 0x14, 0xFE])  # 2.0V = 20/10
+    elif voltage == 3.0: command = bytes([0x09, 0x00, 0x1E, 0xFE])  # 3.0V = 30/10
+    elif voltage == 5.0: command = bytes([0x09, 0x00, 0x32, 0xFE])  # 5.0V = 50/10
+    elif voltage == 12.0: command = bytes([0x09, 0x00, 0x78, 0xFE])  # 12.0V = 120/10
+
     if command:
         await send_serial_command(command, exchange)
         logger.info(f"🔋 电压设置为 {voltage}V: {power_supply_state}")
@@ -560,22 +553,44 @@ async def set_voltage(voltage: float, exchange: aio_pika.Exchange = Depends(get_
         return {"status": "success", "message": f"电压设置为 {voltage}V"}
     return {"status": "error", "message": "无法为该电压值生成指令"}
 
+@app.get("/api/update_power_supply_config")
+async def update_power_supply_config(voltage: float):
+    """仅更新电源配置到后端状态,不发送硬件指令"""
+    global power_supply_state
+
+    # 验证电压范围
+    if not (0 <= voltage <= 12.0):
+        return {"status": "error", "message": "电压超出范围 (0-12.0V)"}
+
+    # 验证电压是否为支持的档位
+    supported_voltages = [2.0, 3.0, 5.0, 12.0]
+    if voltage not in supported_voltages:
+        return {"status": "error", "message": f"不支持的电压档位(仅支持 {supported_voltages})"}
+
+    # 只更新后端状态,不改变outputEnabled,不发送硬件指令
+    power_supply_state["setVoltage"] = voltage
+
+    logger.info(f"🔋 电源配置已更新(仅后端): {power_supply_state}")
+    await save_device_state(last_stream_common, power_supply_dict=power_supply_state)
+    return {"status": "success", "message": f"配置已更新: {voltage}V (未触发硬件)"}
+
 @app.get("/api/set_waveform")
 async def set_waveform(waveform: str, frequency: int, exchange: aio_pika.Exchange = Depends(get_mq_exchange)):
     global signal_generator_state
-    waveform_codes = {"sine": 0x01, "square": 0x02, "triangle": 0x03}
-    freq_codes = {1: 0x01, 100: 0x64}
+    # 只支持正弦波，波形代码固定为 0x00
+    waveform_codes = {"sine": 0x00}
+    freq_codes = {1: 0x01, 10: 0x0A, 100: 0x64}
     waveform_code = waveform_codes.get(waveform.lower())
     freq_code = freq_codes.get(frequency)
     if waveform_code is None or freq_code is None:
-        return {"status": "error", "message": "无效的波形或频率"}
-    
+        return {"status": "error", "message": "无效的波形或频率（仅支持正弦波）"}
+
     # 更新信号发生器状态
     signal_generator_state["outputEnabled"] = True
     signal_generator_state["waveform"] = waveform.lower()
     signal_generator_state["frequency"] = frequency
-    
-    command = bytes([0x30, waveform_code, freq_code, 0xFE])
+
+    command = bytes([0x0A, waveform_code, freq_code, 0xFE])
     await send_serial_command(command, exchange)
     logger.info(f"🌊 信号发生器设置: {waveform}波, {frequency}Hz - 状态: {signal_generator_state}")
     await save_device_state(last_stream_common, signal_generator_dict=signal_generator_state)
@@ -589,6 +604,25 @@ async def signal_generator_stop(exchange: aio_pika.Exchange = Depends(get_mq_exc
     await save_device_state(last_stream_common, signal_generator_dict=signal_generator_state)
     return {"status": "success", "message": "信号发生器已停止"}
 
+@app.get("/api/update_signal_generator_config")
+async def update_signal_generator_config(waveform: str, frequency: int):
+    """仅更新信号发生器配置到后端状态,不发送硬件指令"""
+    global signal_generator_state
+
+    # 验证参数
+    waveform_codes = {"sine": 0x00}
+    freq_codes = {1: 0x01, 10: 0x0A, 100: 0x64}
+    if waveform.lower() not in waveform_codes or frequency not in freq_codes:
+        return {"status": "error", "message": "无效的波形或频率（仅支持正弦波,频率1/10/100Hz）"}
+
+    # 只更新后端状态,不改变outputEnabled,不发送硬件指令
+    signal_generator_state["waveform"] = waveform.lower()
+    signal_generator_state["frequency"] = frequency
+
+    logger.info(f"🌊 信号发生器配置已更新(仅后端): {signal_generator_state}")
+    await save_device_state(last_stream_common, signal_generator_dict=signal_generator_state)
+    return {"status": "success", "message": f"配置已更新: {waveform}波, {frequency}Hz (未触发硬件)"}
+
 @app.get("/health")
 async def health():
     return {"status": "success", "message": f"当前时间: {datetime.now().isoformat()}"}
@@ -601,7 +635,7 @@ async def get_device_status():
     
     # 构建LED状态，确保所有LED都有状态
     led_ui_state = {}
-    for led_num in range(1, 10):
+    for led_num in range(1, 12):
         led_ui_state[f"led{led_num}"] = led_states.get(str(led_num), False)
     
     if last_stream_common is None:
@@ -613,10 +647,8 @@ async def get_device_status():
                 "oscilloscope_button": "closed",
                 "multimeter_buttons": {
                     "resistance": "closed",
-                    "continuity": "closed", 
-                    "dc_voltage": "closed",
-                    "ac_voltage": "closed",
-                    "dc_current": "closed"
+                    "continuity": "closed",
+                    "dc_voltage": "closed"
                 },
                 "led_states": led_ui_state,
                 "power_supply_state": power_supply_state,  # 🔋 添加电源状态
@@ -640,9 +672,7 @@ async def get_device_status():
                 "multimeter_buttons": {
                     "resistance": "closed",
                     "continuity": "closed",
-                    "dc_voltage": "closed", 
-                    "ac_voltage": "closed",
-                    "dc_current": "closed"
+                    "dc_voltage": "closed"
                 },
                 "led_states": led_ui_state,
                 "power_supply_state": power_supply_state,  # 🔋 添加电源状态
@@ -652,13 +682,11 @@ async def get_device_status():
             "signal_generator_state": signal_generator_state,
             "message": "示波器当前处于开启状态"
         }
-    elif last_stream_common and last_stream_common[0] in [0x02, 0x03, 0x04, 0x05, 0x06]:
+    elif last_stream_common and last_stream_common[0] in [0x02, 0x03, 0x04]:
         device_info = {
             0x02: {"type": "multimeter_resistance", "name": "万用表-电阻档", "ui_key": "resistance"},
-            0x03: {"type": "multimeter_continuity", "name": "万用表-通断档", "ui_key": "continuity"}, 
-            0x04: {"type": "multimeter_dc_voltage", "name": "万用表-直流电压档", "ui_key": "dc_voltage"},
-            0x05: {"type": "multimeter_ac_voltage", "name": "万用表-交流电压档", "ui_key": "ac_voltage"},
-            0x06: {"type": "multimeter_dc_current", "name": "万用表-直流电流档", "ui_key": "dc_current"}
+            0x03: {"type": "multimeter_continuity", "name": "万用表-通断档", "ui_key": "continuity"},
+            0x04: {"type": "multimeter_dc_voltage", "name": "万用表-直流电压档", "ui_key": "dc_voltage"}
         }
         info = device_info.get(last_stream_common[0], {"type": "unknown", "name": "未知设备", "ui_key": "unknown"})
         
@@ -666,9 +694,7 @@ async def get_device_status():
         multimeter_buttons = {
             "resistance": "closed",
             "continuity": "closed",
-            "dc_voltage": "closed",
-            "ac_voltage": "closed", 
-            "dc_current": "closed"
+            "dc_voltage": "closed"
         }
         if info["ui_key"] in multimeter_buttons:
             multimeter_buttons[info["ui_key"]] = "opened"
@@ -701,9 +727,7 @@ async def get_device_status():
                 "multimeter_buttons": {
                     "resistance": "unknown",
                     "continuity": "unknown",
-                    "dc_voltage": "unknown",
-                    "ac_voltage": "unknown",
-                    "dc_current": "unknown"
+                    "dc_voltage": "unknown"
                 },
                 "led_states": led_ui_state,
                 "power_supply_state": power_supply_state,  # 🔋 添加电源状态
@@ -777,14 +801,13 @@ async def websocket_endpoint(websocket: WebSocket, channel: aio_pika.Channel = D
                 "state": "opened",
                 "message": "示波器状态已恢复为开启"
             }
-        elif last_stream_common and last_stream_common[0] in [0x02, 0x03, 0x04, 0x05, 0x06]:
-            device_types = {0x02: "电阻档", 0x03: "通断档", 0x04: "直流电压档", 0x05: "交流电压档", 0x06: "直流电流档"}
+        elif last_stream_common and last_stream_common[0] in [0x02, 0x03, 0x04]:
+            device_types = {0x02: "电阻档", 0x03: "通断档", 0x04: "直流电压档"}
             device_type = device_types.get(last_stream_common[0], "未知档位")
             logger.info(f"✅ 已自动恢复万用表开启状态 - {device_type}")
-            
+
             device_types_map = {
-                0x02: "resistance", 0x03: "continuity", 0x04: "dc_voltage", 
-                0x05: "ac_voltage", 0x06: "dc_current"
+                0x02: "resistance", 0x03: "continuity", 0x04: "dc_voltage"
             }
             device_state_info = {
                 "type": "state_sync",
