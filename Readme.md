@@ -166,22 +166,27 @@ if __name__ == '__main__':
 
     ```ini
     [Unit]
-    Description=My YTJ Backend Docker Compose Service
+    Description=My App Docker Compose Service
+    # 确保此服务在Docker和网络都就绪后再启动
     Requires=docker.service
     After=docker.service network-online.target
 
     [Service]
-    Type=oneshot
-    RemainAfterExit=yes
+    # 你的Linux用户名，最好不要用root。该用户需要有运行docker的权限（通常是docker用户组成员）
+    User=gj
+    # 你的项目文件夹的绝对路径，也就是 docker-compose.yml 文件所在的目录
+    WorkingDirectory=/opt/turcar
+    RestartSec=10
+    Restart=on-failure
+    # 关键的启动和停止命令
+    # 注意：现代Docker使用 `docker compose` (无横杠)
+    # 如果你的版本较旧，可能需要使用 `docker-compose` (有横杠)
+    ExecStart=/usr/bin/docker compose up -d
+    ExecStop=/usr/bin/docker compose down
 
-    # !!! 修改为你项目 compose.yaml 文件所在的绝对路径 !!!
-    WorkingDirectory=/home/user/ytj-backend
-
-    # 启动命令
-    ExecStart=/usr/local/bin/docker-compose up -d
-
-    # 停止命令
-    ExecStop=/usr/local/bin/docker-compose down
+    # 当服务停止时，即使 `ExecStart` 命令（up -d）已经退出，服务仍被认为是活动的
+    # 这确保了 `ExecStop` 可以在系统关机时被正确调用
+    RemainAfterExit=true
 
     [Install]
     WantedBy=multi-user.target
@@ -229,3 +234,103 @@ if __name__ == '__main__':
     *   新启动的 `serial-service` 容器再次尝试连接 `/dev/ttyMCU`，并成功恢复通信。
 
 您已成功构建了一个无需人工干预、具备高度可用性的物联网后台服务。
+
+## 查看日志
+
+现在查看日志非常简单，主要有两种方法，分别用于**查看容器内应用程序的日志**和**查看 `systemd` 服务本身的日志**。
+
+对于您的日常开发和问题排查，**99% 的情况下您会使用第一种方法**。
+
+---
+
+### 方法一：使用 `docker-compose logs` (推荐，用于查看应用日志)
+
+这是查看您各个服务（如 `serial-service`, `web-service` 等）内部应用程序打印信息（`print`, `logger.info` 等）的标准方法。
+
+由于 `systemd` 是从根目录环境 (`/`) 运行您的 `docker-compose` 命令的，直接在您的项目目录里运行 `docker-compose logs` 可能不会立即生效。最可靠的方式是明确指定 `compose.yaml` 文件的路径。
+
+#### 1. 查看所有服务的日志
+
+打开终端，执行以下命令：
+
+```bash
+# -f 选项指定了 compose 文件的路径
+docker-compose -f /path/to/your/project/compose.yaml logs
+```**请务必将 `/path/to/your/project/compose.yaml` 替换为您 `compose.yaml` 文件的真实绝对路径。**
+
+#### 2. 实时跟踪日志 (最常用)
+
+使用 `-f` 或 `--follow` 选项可以像 `tail -f` 一样实时查看新产生的日志，这对于调试非常有用。
+
+```bash
+docker-compose -f /path/to/your/project/compose.yaml logs -f
+```
+
+#### 3. 只查看特定服务的日志
+
+当您的项目服务很多时，通常您只关心某一个服务的日志。
+
+```bash
+# 实时跟踪 serial-service 的日志
+docker-compose -f /path/to/your/project/compose.yaml logs -f serial-service
+
+# 实时跟踪 ytj_web_service 的日志
+docker-compose -f /path/to/your/project/compose.yaml logs -f ytj_web_service
+```
+
+#### 4. 查看最近的N行日志
+
+使用 `--tail` 选项可以避免被历史日志刷屏。
+
+```bash
+# 查看 serial-service 最近的 50 行日志，并实时跟踪
+docker-compose -f /path/to/your/project/compose.yaml logs -f --tail="50" serial-service
+```
+
+---
+
+### 方法二：使用 `journalctl` (用于排查服务启动问题)
+
+这个方法用于查看 `systemd` 服务本身的日志。它**不会显示您 Python 代码中的 `print` 信息**，而是显示 `docker-compose up` 这个命令本身执行过程中的输出。
+
+**什么时候使用它？**
+*   当你的服务启动失败时 (例如 `systemctl status ytj-backend.service` 显示 `failed`)。
+*   你想确认 `systemd` 是否真的按时执行了 `docker-compose up` 命令。
+*   `compose.yaml` 文件本身有语法错误，导致 `docker-compose` 命令执行失败。
+
+#### 1. 查看服务的完整日志
+
+```bash
+sudo journalctl -u ytj-backend.service```
+
+#### 2. 实时跟踪服务日志
+
+```bash
+sudo journalctl -u ytj-backend.service -f
+```
+
+#### 3. 查看最近的N行日志
+
+```bash
+# 查看最近的 100 行日志
+sudo journalctl -u ytj-backend.service -n 100
+```
+
+---
+
+### 总结与排错流程
+
+| 工具 | `docker-compose logs` | `journalctl -u ytj-backend.service` |
+| :--- | :--- | :--- |
+| **看什么？** | **容器内应用程序的输出** (Python的`logger`, `print`等) | **`systemd` 服务管理**的输出 (`docker-compose up`命令本身) |
+| **何时使用？** | **日常开发、调试应用逻辑**、查看串口数据收发等。 | **排查服务启动失败**、`compose.yaml`语法错误等底层问题。 |
+| **命令示例** | `... logs -f serial-service` | `... -u ytj-backend.service -f` |
+
+**标准的排错流程应该是：**
+
+1.  **检查服务状态**：
+    ```bash
+    systemctl status ytj-backend.service
+    ```
+2.  **如果状态是 `active (exited)`**：说明服务启动命令已成功执行。此时你应该**使用 `docker-compose logs`** 来查看你的应用程序是否按预期工作。
+3.  **如果状态是 `failed`**：说明 `docker-compose up` 命令本身就执行失败了。此时你应该**使用 `journalctl -u ytj-backend.service`** 来查看失败的原因（比如路径错误、文件权限问题等）。
