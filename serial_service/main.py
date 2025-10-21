@@ -26,8 +26,8 @@ FROM_SERIAL_ROUTING_KEY = 'from_serial_routing_key'
 FROM_SERIAL_QUEUE = 'from_serial_queue' 
 
 # 串口配置
-SERIAL_PORT = "/dev/ttyACM0"  # 根据你的实际情况修改，Windows上可能是 "COM3"
-SERIAL_BAUDRATE = 9600
+SERIAL_PORT = "/dev/ttyMCU"  # 根据你的实际情况修改，Windows上可能是 "COM3"
+SERIAL_BAUDRATE = 115200
 
 # 工作线程函数
 

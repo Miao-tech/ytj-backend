@@ -29,12 +29,13 @@ services:
       RABBITMQ_DEFAULT_USER: user
       RABBITMQ_DEFAULT_PASS: password
     devices:
-      - "/dev/ttyACM0:/dev/ttyACM0"
+      - "/dev/ttyMCU:/dev/ttyMCU"
     depends_on:
       rabbitmq-service:
         condition: service_healthy
     networks:
       - app-network
+    restart: on-failure
 
 
   # 一体机web服务
